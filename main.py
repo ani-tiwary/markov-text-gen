@@ -1,5 +1,8 @@
+import sys
 import numpy as np
+import requests
 from scipy.sparse import csr_matrix
+from bs4 import BeautifulSoup
 
 
 def preprocess_text(text):
@@ -75,7 +78,6 @@ def generate_text(transition_matrix, word_to_index, num_words=100, start_word=' 
     first_sentence = ' '.join(text).split('.')
     if first_sentence:
         first_sentence[0] = capitalize_first_letter(first_sentence[0])
-    generated_text = '.'.join(first_sentence)
     for i in range(1, len(text)):
         text[0] = capitalize_first_letter(text[0])
         if text[i - 1].endswith(('.', '!', '?')):
@@ -85,18 +87,26 @@ def generate_text(transition_matrix, word_to_index, num_words=100, start_word=' 
 
 
 def main():
-    input_file = 'macbeth.txt'
-    with open(input_file, 'r') as file:
-        text = file.read()
+    if len(sys.argv) != 2:
+        print("Usage: python main.py <URL>")
+        return
+    url = sys.argv[1]
+    response = requests.get(url)
+    if response.status_code == 200:
+        html_content = response.content
+        soup = BeautifulSoup(html_content, 'html.parser')
+        text = soup.get_text()
+    else:
+        print("Failed to fetch the page.")
+        return
     preprocessed_text = preprocess_text(text)
     transition_matrix, word_to_index = generate_transition_matrix(preprocessed_text)
     valid_start_words = [word for word in preprocessed_text if word.strip()]
     start_word = np.random.choice(valid_start_words)
-    num_words = 100
+    num_words = 50
     generated_text = generate_text(transition_matrix, word_to_index, num_words=num_words, start_word=start_word)
     print("\nGenerated Text:")
     print(generated_text)
-    generated_words = generated_text.split()
 
 
 if __name__ == "__main__":
