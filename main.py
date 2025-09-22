@@ -3,43 +3,138 @@ import numpy as np
 import requests
 import sys
 from collections import defaultdict
+import math
 
 
 def preprocess_text(text):
     return [word.lower() for word in text.split() if word]
 
 
+def calculate_discount(discount_factor=0.75):
+    """Calculate discount factor for Kneser-Ney smoothing"""
+    return discount_factor
+
+
+def count_ngrams(text, n):
+    """Count n-grams in text"""
+    ngrams = defaultdict(int)
+    for i in range(len(text) - n + 1):
+        ngram = tuple(text[i:i+n])
+        ngrams[ngram] += 1
+    return ngrams
+
+
+def count_continuations(text, n):
+    """Count how many different words can follow each (n-1)-gram"""
+    continuations = defaultdict(int)
+    seen_contexts = defaultdict(set)
+    
+    for i in range(len(text) - n + 1):
+        context = tuple(text[i:i+n-1])
+        next_word = text[i+n-1]
+        seen_contexts[context].add(next_word)
+    
+    for context, words in seen_contexts.items():
+        continuations[context] = len(words)
+    
+    return continuations
+
+
+def kneser_ney_probability(ngram, ngram_counts, continuation_counts, 
+                          discount_factor=0.75, vocab_size=None):
+    """Calculate Kneser-Ney smoothed probability for an n-gram"""
+    
+    if len(ngram) == 1:
+        
+        continuation_count = continuation_counts.get(ngram, 0)
+        total_continuations = sum(continuation_counts.values())
+        if total_continuations == 0:
+            return 1.0 / (vocab_size or 1000)  
+        return continuation_count / total_continuations
+    
+    
+    context = ngram[:-1]
+    next_word = ngram[-1]
+    
+    
+    count = ngram_counts.get(ngram, 0)
+    
+    
+    context_count = sum(v for k, v in ngram_counts.items() if k[:-1] == context)
+    
+    if context_count == 0:
+        
+        return kneser_ney_probability(ngram[1:], ngram_counts, continuation_counts, 
+                                    discount_factor, vocab_size)
+    
+    
+    discounted_count = max(count - discount_factor, 0)
+    
+    
+    lambda_weight = (discount_factor * continuation_counts.get(context, 0)) / context_count
+    
+    
+    higher_order_prob = discounted_count / context_count if context_count > 0 else 0
+    
+    
+    lower_order_prob = kneser_ney_probability(ngram[1:], ngram_counts, continuation_counts, 
+                                            discount_factor, vocab_size)
+    
+    return higher_order_prob + lambda_weight * lower_order_prob
+
+
 def generate_transition_matrix(text):
+    """Generate transition matrices using Kneser-Ney smoothing"""
     words = list(set(text))
     word_to_index = {word: i for i, word in enumerate(words)}
+    vocab_size = len(words)
+    discount = 0.75
     
-    bigram_transitions = defaultdict(lambda: defaultdict(int))
-    unigram_transitions = defaultdict(lambda: defaultdict(int))
     
-    for i in range(len(text) - 2):
-        current_idx = (word_to_index[text[i]], word_to_index[text[i + 1]])
-        next_idx = word_to_index[text[i + 2]]
-        bigram_transitions[current_idx][next_idx] += 1
-        
-        current_single_idx = word_to_index[text[i + 1]]
-        unigram_transitions[current_single_idx][next_idx] += 1
+    bigram_counts = defaultdict(int)
+    unigram_counts = defaultdict(int)
+    
+    for i in range(len(text) - 1):
+        bigram_counts[(text[i], text[i+1])] += 1
+        unigram_counts[text[i]] += 1
+    unigram_counts[text[-1]] += 1  
+    
     
     bigram_matrix = {}
+    
+    for (w1, w2), count in bigram_counts.items():
+        if w1 in word_to_index and w2 in word_to_index:
+            w1_idx = word_to_index[w1]
+            w2_idx = word_to_index[w2]
+            
+            if w1_idx not in bigram_matrix:
+                bigram_matrix[w1_idx] = {}
+            
+            
+            context_count = unigram_counts[w1]
+            discounted_count = max(count - discount, 0)
+            higher_order_prob = discounted_count / context_count
+            
+            
+            lambda_weight = discount / context_count
+            unigram_prob = unigram_counts[w2] / sum(unigram_counts.values())
+            
+            prob = higher_order_prob + lambda_weight * unigram_prob
+            bigram_matrix[w1_idx][w2_idx] = prob
+    
+    
+    for context, probs in bigram_matrix.items():
+        total = sum(probs.values())
+        if total > 0:
+            bigram_matrix[context] = {k: v/total for k, v in probs.items()}
+    
+    
     unigram_matrix = {}
+    total_words = sum(unigram_counts.values())
     
-    for current_idx, next_counts in bigram_transitions.items():
-        total_count = sum(next_counts.values())
-        bigram_matrix[current_idx] = {
-            next_idx: count / total_count 
-            for next_idx, count in next_counts.items()
-        }
-    
-    for current_idx, next_counts in unigram_transitions.items():
-        total_count = sum(next_counts.values())
-        unigram_matrix[current_idx] = {
-            next_idx: count / total_count 
-            for next_idx, count in next_counts.items()
-        }
+    for word, count in unigram_counts.items():
+        word_idx = word_to_index[word]
+        unigram_matrix[word_idx] = {word_idx: count / total_words}
     
     return bigram_matrix, unigram_matrix, word_to_index
 
@@ -62,52 +157,69 @@ def capitalize_pronouns(word):
 
 
 def generate_text(bigram_matrix, unigram_matrix, word_to_index, num_words=100, start_words=(' ', ' ')):
-    text = list(start_words)
-    current_idx = (word_to_index.get(start_words[0], -1), word_to_index.get(start_words[1], -1))
+    """Generate text using Kneser-Ney smoothed probabilities"""
+    all_words = list(word_to_index.keys())
+    text = []
+    
+    
+    if len(start_words) >= 2:
+        text = list(start_words)
+        current_idx = word_to_index.get(start_words[1], 0)
+    else:
+        
+        start_idx = np.random.choice(len(all_words))
+        text.append(all_words[start_idx])
+        current_idx = start_idx
+    
     
     recent_words = []
-    consecutive_bigram_uses = 0
-    max_consecutive_bigrams = 3 
     
     while len(text) < num_words or not text[-1].endswith(('.', '!', '?')):
-        use_unigram = False
         
-        if current_idx in bigram_matrix:
-            if consecutive_bigram_uses >= max_consecutive_bigrams:
-                use_unigram = True
-            elif len(bigram_matrix[current_idx]) == 1:
-                use_unigram = np.random.random() < 0.7
-            
-            if not use_unigram:
-                probabilities = bigram_matrix[current_idx]
-                consecutive_bigram_uses += 1
-            else:
-                probabilities = unigram_matrix[current_idx[1]]
-                consecutive_bigram_uses = 0
+        if current_idx in bigram_matrix and bigram_matrix[current_idx]:
+            probs = list(bigram_matrix[current_idx].values())
+            indices = list(bigram_matrix[current_idx].keys())
+            next_idx = np.random.choice(indices, p=probs)
         else:
-            if current_idx[1] in unigram_matrix:
-                probabilities = unigram_matrix[current_idx[1]]
+            
+            if current_idx in unigram_matrix and unigram_matrix[current_idx]:
+                probs = list(unigram_matrix[current_idx].values())
+                indices = list(unigram_matrix[current_idx].keys())
+                next_idx = np.random.choice(indices, p=probs)
             else:
-                break
-        next_idx = np.random.choice(list(probabilities.keys()), p=list(probabilities.values()))
-        next_word = list(word_to_index.keys())[next_idx]
+                
+                next_idx = np.random.choice(len(all_words))
+        
+        next_word = all_words[next_idx]
+        
+        
         recent_words.append(next_word)
-        if len(recent_words) > 5:
+        if len(recent_words) > 3:
             recent_words.pop(0)
-            if recent_words.count(next_word) > 2:
-                if current_idx[1] in unigram_matrix:
-                    probabilities = unigram_matrix[current_idx[1]]
-                    next_idx = np.random.choice(list(probabilities.keys()), p=list(probabilities.values()))
-                    next_word = list(word_to_index.keys())[next_idx]
+            
+            if recent_words.count(next_word) > 1:
+                
+                if current_idx in bigram_matrix and len(bigram_matrix[current_idx]) > 1:
+                    
+                    available_probs = {k: v for k, v in bigram_matrix[current_idx].items() 
+                                     if all_words[k] != next_word}
+                    if available_probs:
+                        probs = list(available_probs.values())
+                        indices = list(available_probs.keys())
+                        if probs:  
+                            probs = np.array(probs) / np.sum(probs)  
+                            next_idx = np.random.choice(indices, p=probs)
+                            next_word = all_words[next_idx]
+        
         
         next_word = capitalize_pronouns(next_word)
-        if text[-1].endswith(('!', '?')):
+        if text and text[-1].endswith(('!', '?')):
             next_word = next_word.capitalize()
-        elif text[-1].endswith(('.',)):
+        elif text and text[-1].endswith(('.',)):
             next_word = next_word if next_word.startswith("'") else capitalize_first_letter(next_word)
         
         text.append(next_word)
-        current_idx = (current_idx[1], next_idx)
+        current_idx = next_idx
     
     generated_text = ' '.join(text)
     first_sentence, *remaining_text = generated_text.split('.')
@@ -116,6 +228,42 @@ def generate_text(bigram_matrix, unigram_matrix, word_to_index, num_words=100, s
     remaining_text = [capitalize_first_letter(sentence) if sentence else sentence for sentence in remaining_text]
     generated_text = '. '.join([first_sentence, *remaining_text])
     return generated_text
+
+
+def calculate_perplexity(text, bigram_matrix, unigram_matrix, word_to_index):
+    """Calculate perplexity of the model on given text"""
+    total_log_prob = 0.0
+    total_words = 0
+    
+    for i in range(len(text) - 1):
+        current_word = text[i]
+        next_word = text[i + 1]
+        
+        if current_word in word_to_index and next_word in word_to_index:
+            current_idx = word_to_index[current_word]
+            next_idx = word_to_index[next_word]
+            
+            
+            prob = 0.0
+            if current_idx in bigram_matrix and next_idx in bigram_matrix[current_idx]:
+                prob = bigram_matrix[current_idx][next_idx]
+            elif current_idx in unigram_matrix and next_idx in unigram_matrix[current_idx]:
+                prob = unigram_matrix[current_idx][next_idx]
+            else:
+                
+                vocab_size = len(word_to_index)
+                prob = 1.0 / vocab_size
+            
+            if prob > 0:
+                total_log_prob += math.log(prob)
+                total_words += 1
+    
+    if total_words == 0:
+        return float('inf')
+    
+    avg_log_prob = total_log_prob / total_words
+    perplexity = math.exp(-avg_log_prob)
+    return perplexity
 
 
 def main():
@@ -131,7 +279,14 @@ def main():
     soup = BeautifulSoup(html_content, 'html.parser')
     text = soup.get_text()
     preprocessed_text = preprocess_text(text)
+    print(f"Processing {len(preprocessed_text)} words with {len(set(preprocessed_text))} unique words...")
+    
     bigram_matrix, unigram_matrix, word_to_index = generate_transition_matrix(preprocessed_text)
+    
+    
+    perplexity = calculate_perplexity(preprocessed_text, bigram_matrix, unigram_matrix, word_to_index)
+    print(f"Model perplexity: {perplexity:.2f}")
+    
     valid_start_words = [word for word in preprocessed_text if word.strip()]
     start_word_idx = np.random.choice(len(valid_start_words) - 1)
     start_words = (valid_start_words[start_word_idx], valid_start_words[start_word_idx + 1])
