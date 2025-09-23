@@ -6,8 +6,36 @@ from collections import defaultdict
 import math
 
 
-def preprocess_text(text):
-    return [word.lower() for word in text.split() if word]
+# Default banned words list (common Gutenberg terms and other unwanted words)
+DEFAULT_BANNED_WORDS = {
+    'project', 'gutenberg', 'gutenberg-tm', 'tm', 'electronic', 'work', 'works', 
+    'copyright', 'rights', 'reserved', 'license', 'licensed', 'licensee',
+    'foundation', 'www', 'http', 'https', 'html', 'xml', 'utf-8', 'charset',
+    'encoding', 'doctype', 'meta', 'link', 'script', 'style', 'title', 'head',
+    'body', 'div', 'span', 'class', 'id', 'href', 'src', 'alt', 'width', 'height',
+    'table', 'tr', 'td', 'th', 'p', 'br', 'hr', 'img', 'a', 'ul', 'ol', 'li',
+    'blockquote', 'cite', 'em', 'strong', 'b', 'i', 'u', 'pre', 'code',
+    'version', 'release', 'date', 'updated', 'released', 'published'
+}
+
+
+def preprocess_text(text, banned_words=None):
+    """Preprocess text by converting to lowercase and filtering out banned words"""
+    if banned_words is None:
+        banned_words = DEFAULT_BANNED_WORDS
+    
+    words = text.split()
+    filtered_words = []
+    
+    for word in words:
+        # Clean the word by removing punctuation and converting to lowercase
+        clean_word = ''.join(c.lower() for c in word if c.isalnum())
+        
+        # Skip empty words and banned words
+        if clean_word and clean_word not in banned_words:
+            filtered_words.append(clean_word)
+    
+    return filtered_words
 
 
 def calculate_discount(discount_factor=0.75):
@@ -173,8 +201,11 @@ def generate_text(bigram_matrix, unigram_matrix, word_to_index, num_words=100, s
     
     
     recent_words = []
+    max_iterations = num_words * 3  # Safety limit to prevent infinite loops
+    iterations = 0
     
-    while len(text) < num_words or not text[-1].endswith(('.', '!', '?')):
+    while (len(text) < num_words or not text[-1].endswith(('.', '!', '?'))) and iterations < max_iterations:
+        iterations += 1
         
         if current_idx in bigram_matrix and bigram_matrix[current_idx]:
             probs = list(bigram_matrix[current_idx].values())
@@ -220,6 +251,11 @@ def generate_text(bigram_matrix, unigram_matrix, word_to_index, num_words=100, s
         
         text.append(next_word)
         current_idx = next_idx
+    
+    # If we hit the iteration limit, just add a period to end the text
+    if iterations >= max_iterations:
+        if not text[-1].endswith(('.', '!', '?')):
+            text.append('.')
     
     generated_text = ' '.join(text)
     first_sentence, *remaining_text = generated_text.split('.')
@@ -288,9 +324,14 @@ def main():
     print(f"Model perplexity: {perplexity:.2f}")
     
     valid_start_words = [word for word in preprocessed_text if word.strip()]
+    if len(valid_start_words) < 2:
+        print("Error: Not enough words to generate text (need at least 2 words)")
+        return
+    
     start_word_idx = np.random.choice(len(valid_start_words) - 1)
     start_words = (valid_start_words[start_word_idx], valid_start_words[start_word_idx + 1])
     num_words = 50
+    print(f"Starting text generation with {len(word_to_index)} unique words...")
     generated_text = generate_text(bigram_matrix, unigram_matrix, word_to_index, num_words=num_words, start_words=start_words)
     print("\nGenerated Text:")
     print(generated_text)
