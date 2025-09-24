@@ -35,11 +35,12 @@ The implementation uses:
 
 ## Example Output
 ```
-Processing 28523 words with 5521 unique words...
-Model perplexity: 15.23
+Processing 179651 words with 6193 unique words...
+Model perplexity: 34.40
 
 Generated Text:
-I should be ashamed of myself, without hearing her; and a sigh: 'he won't you, will be a look like to her sister...
+
+This by fortune's might as thy heart of that which makes my bones with compare thee will be fairer than thee. The sad augurs mock my life hath no man ever.
 ```
 
 ## Suggested Text Sources

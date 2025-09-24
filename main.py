@@ -2,7 +2,7 @@ from bs4 import BeautifulSoup
 import numpy as np
 import requests
 import sys
-from text_processing import preprocess_text
+from text_processing import preprocess_text, filter_nonsensical_combinations
 from markov_model import generate_transition_matrix
 from text_generator import generate_text, calculate_perplexity, analyze_sentence_patterns
 
@@ -20,6 +20,10 @@ def main():
     soup = BeautifulSoup(html_content, "html.parser")
     text = soup.get_text()
     preprocessed_text = preprocess_text(text)
+    
+    # Filter out nonsensical combinations
+    preprocessed_text = filter_nonsensical_combinations(preprocessed_text)
+    
     print(
         f"Processing {len(preprocessed_text)} words with {len(set(preprocessed_text))} unique words..."
     )

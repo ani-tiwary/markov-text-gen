@@ -89,3 +89,53 @@ def generate_transition_matrix(text):
         unigram_matrix[word_idx] = {word_idx: count / total_words}
 
     return bigram_matrix, unigram_matrix, word_to_index
+
+
+def generate_trigram_model(text):
+    words = list(set(text))
+    word_to_index = {word: i for i, word in enumerate(words)}
+    vocab_size = len(words)
+    
+    trigram_counts = defaultdict(int)
+    bigram_counts = defaultdict(int)
+    unigram_counts = defaultdict(int)
+    
+    # Count trigrams, bigrams, and unigrams
+    for i in range(len(text) - 2):
+        trigram = (text[i], text[i + 1], text[i + 2])
+        bigram = (text[i], text[i + 1])
+        trigram_counts[trigram] += 1
+        bigram_counts[bigram] += 1
+        unigram_counts[text[i]] += 1
+    
+    # Add remaining unigrams
+    for i in range(len(text) - 2, len(text)):
+        unigram_counts[text[i]] += 1
+    
+    # Build trigram matrix
+    trigram_matrix = {}
+    for (w1, w2, w3), count in trigram_counts.items():
+        if w1 in word_to_index and w2 in word_to_index and w3 in word_to_index:
+            w1_idx = word_to_index[w1]
+            w2_idx = word_to_index[w2]
+            w3_idx = word_to_index[w3]
+            
+            if w1_idx not in trigram_matrix:
+                trigram_matrix[w1_idx] = {}
+            if w2_idx not in trigram_matrix[w1_idx]:
+                trigram_matrix[w1_idx][w2_idx] = {}
+            
+            # Calculate probability
+            context_count = bigram_counts.get((w1, w2), 0)
+            if context_count > 0:
+                prob = count / context_count
+                trigram_matrix[w1_idx][w2_idx][w3_idx] = prob
+    
+    # Normalize probabilities
+    for w1_idx in trigram_matrix:
+        for w2_idx in trigram_matrix[w1_idx]:
+            total = sum(trigram_matrix[w1_idx][w2_idx].values())
+            if total > 0:
+                trigram_matrix[w1_idx][w2_idx] = {k: v/total for k, v in trigram_matrix[w1_idx][w2_idx].items()}
+    
+    return trigram_matrix, word_to_index

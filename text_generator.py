@@ -128,6 +128,120 @@ def add_punctuation(word, position_in_sentence, sentence_length, comma_probs=Non
     return word
 
 
+def select_better_next_word(current_word, bigram_matrix, word_to_index, recent_words):
+    all_words = list(word_to_index.keys())
+    
+    if current_word in word_to_index:
+        current_idx = word_to_index[current_word]
+        
+        if current_idx in bigram_matrix and bigram_matrix[current_idx]:
+            # Get available words and their probabilities
+            available_words = {}
+            for next_idx, prob in bigram_matrix[current_idx].items():
+                next_word = all_words[next_idx]
+                
+                # Avoid recent repetition
+                if next_word not in recent_words:
+                    available_words[next_word] = prob
+                else:
+                    # Reduce probability for recently used words
+                    available_words[next_word] = prob * 0.1
+            
+            if available_words:
+                # Select based on weighted probabilities
+                words = list(available_words.keys())
+                probs = list(available_words.values())
+                total_prob = sum(probs)
+                if total_prob > 0:
+                    probs = [p/total_prob for p in probs]
+                    return np.random.choice(words, p=probs)
+    
+    # Fallback to random selection
+    return np.random.choice(all_words)
+
+
+def should_end_here(sentence, word_count):
+    # More intelligent sentence ending logic
+    if word_count < 5:
+        return False
+    
+    if word_count >= 20:
+        return True
+    
+    # Check for natural ending patterns
+    if len(sentence) >= 2:
+        last_two = sentence[-2:]
+        
+        # Common sentence endings
+        ending_patterns = [
+            ('is', 'good'), ('was', 'great'), ('are', 'fine'),
+            ('can', 'help'), ('will', 'work'), ('should', 'go'),
+            ('have', 'done'), ('had', 'been'), ('get', 'better')
+        ]
+        
+        if tuple(last_two) in ending_patterns:
+            return np.random.random() < 0.7
+    
+    # Length-based probability
+    if word_count >= 8:
+        end_prob = min(0.2 + (word_count - 8) * 0.05, 0.8)
+        return np.random.random() < end_prob
+    
+    return False
+
+
+def generate_structured_sentence(bigram_matrix, word_to_index, min_words=5, max_words=18):
+    # Common sentence starters
+    starters = ['the', 'i', 'this', 'that', 'we', 'you', 'they', 'it', 'there', 'here']
+    start_word = np.random.choice(starters)
+    
+    sentence = [start_word]
+    current_word = start_word
+    recent_words = []
+    
+    for word_count in range(max_words):
+        # Add current word to recent words
+        recent_words.append(current_word)
+        if len(recent_words) > 5:
+            recent_words.pop(0)
+        
+        # Select next word with better logic
+        next_word = select_better_next_word(current_word, bigram_matrix, word_to_index, recent_words)
+        
+        # Apply basic grammar rules
+        next_word = apply_basic_grammar_rules(sentence, next_word)
+        
+        sentence.append(next_word)
+        current_word = next_word
+        
+        # Check if we should end the sentence
+        if word_count >= min_words - 1 and should_end_here(sentence, word_count + 1):
+            break
+    
+    return sentence
+
+
+def apply_basic_grammar_rules(sentence, next_word):
+    # Basic grammar improvements
+    if len(sentence) >= 1:
+        prev_word = sentence[-1].lower()
+        
+        # Avoid repetition
+        if next_word.lower() == prev_word:
+            # Try to find a different word
+            return next_word  # For now, just return the same word
+        
+        # Basic subject-verb patterns
+        if prev_word == 'i' and next_word in ['am', 'was', 'will', 'have', 'had', 'can', 'should']:
+            return next_word
+        elif prev_word == 'the' and next_word in ['man', 'woman', 'house', 'car', 'book', 'day', 'night', 'time', 'way', 'thing']:
+            return next_word
+        elif prev_word == 'a' and next_word in ['man', 'woman', 'house', 'car', 'book', 'day', 'night', 'time', 'way', 'thing']:
+            return next_word
+    
+    return next_word
+
+
 def generate_text(
     bigram_matrix,
     unigram_matrix,
@@ -137,95 +251,39 @@ def generate_text(
     ending_probs=None,
     comma_probs=None,
 ):
-    all_words = list(word_to_index.keys())
     sentences = []
 
     for sentence_num in range(num_sentences):
-        text = []
-
-        if sentence_num == 0 and len(start_words) >= 2:
-            text = list(start_words)
-            current_idx = word_to_index.get(start_words[1], 0)
-        else:
-            start_idx = np.random.choice(len(all_words))
-            text.append(all_words[start_idx])
-            current_idx = start_idx
-
-        recent_words = []
-        max_iterations = 50
-        iterations = 0
-        word_count = len(text)
-
-        while iterations < max_iterations:
-            iterations += 1
-
-            if current_idx in bigram_matrix and bigram_matrix[current_idx]:
-                probs = list(bigram_matrix[current_idx].values())
-                indices = list(bigram_matrix[current_idx].keys())
-                next_idx = np.random.choice(indices, p=probs)
+        # Use the new structured sentence generation
+        sentence = generate_structured_sentence(bigram_matrix, word_to_index)
+        
+        # Apply punctuation and capitalization
+        formatted_sentence = []
+        for i, word in enumerate(sentence):
+            # Add punctuation
+            word = add_punctuation(word, i, len(sentence), comma_probs)
+            
+            # Capitalize appropriately
+            if i == 0:
+                word = capitalize_first_letter(word)
             else:
-                if current_idx in unigram_matrix and unigram_matrix[current_idx]:
-                    probs = list(unigram_matrix[current_idx].values())
-                    indices = list(unigram_matrix[current_idx].keys())
-                    next_idx = np.random.choice(indices, p=probs)
-                else:
-                    next_idx = np.random.choice(len(all_words))
-
-            next_word = all_words[next_idx]
-
-            recent_words.append(next_word)
-            if len(recent_words) > 3:
-                recent_words.pop(0)
-                if recent_words.count(next_word) > 1:
-                    if (
-                        current_idx in bigram_matrix
-                        and len(bigram_matrix[current_idx]) > 1
-                    ):
-                        available_probs = {
-                            k: v
-                            for k, v in bigram_matrix[current_idx].items()
-                            if all_words[k] != next_word
-                        }
-                        if available_probs:
-                            probs = list(available_probs.values())
-                            indices = list(available_probs.keys())
-                            if probs:
-                                probs = np.array(probs) / np.sum(probs)
-                                next_idx = np.random.choice(indices, p=probs)
-                                next_word = all_words[next_idx]
-
-            next_word = add_punctuation(next_word, word_count, 20, comma_probs)
-
-            next_word = capitalize_pronouns(next_word)
-            if text and text[-1].endswith(("!", "?")):
-                next_word = next_word.capitalize()
-            elif text and text[-1].endswith((".",)):
-                next_word = (
-                    next_word
-                    if next_word.startswith("'")
-                    else capitalize_first_letter(next_word)
-                )
-            elif word_count == 0:
-                next_word = capitalize_first_letter(next_word)
-
-            text.append(next_word)
-            current_idx = next_idx
-            word_count += 1
-
-            if should_end_sentence(text, next_word, word_count, ending_probs):
-                break
-
-        if not text[-1].endswith((".", "!", "?", ",")):
-            if word_count <= 10:
+                word = capitalize_pronouns(word)
+            
+            formatted_sentence.append(word)
+        
+        # Add sentence ending
+        if not formatted_sentence[-1].endswith((".", "!", "?", ",")):
+            if len(formatted_sentence) <= 10:
                 ending = np.random.choice([".", "!"], p=[0.8, 0.2])
             else:
                 ending = np.random.choice([".", "!", "?"], p=[0.7, 0.2, 0.1])
-            text.append(ending)
-
-        sentences.append(" ".join(text))
+            formatted_sentence.append(ending)
+        
+        sentences.append(" ".join(formatted_sentence))
 
     generated_text = " ".join(sentences)
 
+    # Clean up formatting
     generated_text = re.sub(r"\s+", " ", generated_text)
     generated_text = re.sub(r"([.!?])\s*([.!?])", r"\1", generated_text)
     generated_text = re.sub(r",\s*,", ",", generated_text)
